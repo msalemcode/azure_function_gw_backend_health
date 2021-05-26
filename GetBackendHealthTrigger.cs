@@ -28,137 +28,149 @@ namespace GatwaybackendHealth
             )
         {
 
-                string gatewayResouceId=req.Query["gatwayid"];
+            string gatewayResouceId = req.Query["gatwayid"];
 
-                string filter=req.Query["ingnorehealth"];
+            string filter = req.Query["ingnorehealth"];
 
-                if(gatewayResouceId == null)
+            if (gatewayResouceId == null)
+            {
+                return new HttpResponseMessage(HttpStatusCode.BadRequest)
                 {
-                    return new  HttpResponseMessage(HttpStatusCode.BadRequest) {
-                       Content = new StringContent("Please pass a name on the query string or in the request body")
-                    };
-                }
-                    
-        
-         
+                    Content = new StringContent("Please pass a name on the query string or in the request body")
+                };
+            }
 
-                log.LogInformation("Function will check backend for gatway ID =" + gatewayResouceId);
-                try
+            log.LogInformation("Function will check backend for gatway ID =" + gatewayResouceId);
+
+            if (filter != null)
+            {
+                log.LogInformation("Function will Ingnore the health type =" + filter);
+
+            }
+
+            try
+            {
+
+
+                // Get token
+                string token = AuthHelper.GetTokenAsync().Result;
+                log.LogInformation($"Token Received: {token}");
+
+
+                // set url
+                string api_url = "https://management.azure.com" + gatewayResouceId + "?api-version=2020-11-01";
+                log.LogInformation("Current url : " + api_url);
+
+                // Call first API to get gatway operationID
+
+                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                var response = await client.PostAsync(api_url, null);
+                response.EnsureSuccessStatusCode();
+                log.LogInformation("Current Status code" + (response.IsSuccessStatusCode).ToString());
+                log.LogInformation("Cheack header");
+
+                string location = response.Headers.GetValues("location").FirstOrDefault(); ;
+                log.LogInformation("found location : " + location);
+
+
+                HttpClient client2 = new HttpClient();
+                client2.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                string responseBody = "Content is blank";
+                while (true)
                 {
 
-                    // Get token
-                    string token = AuthHelper.GetTokenAsync().Result;
-                    log.LogInformation($"Token Received: {token}");
+                    var httpResponse = client2.GetAsync(location).Result;
+                    httpResponse.EnsureSuccessStatusCode();
+                    log.LogInformation("Current Status code " + httpResponse.StatusCode.ToString());
 
-
-                    // set url
-                    string api_url="https://management.azure.com"+gatewayResouceId+"?api-version=2020-11-01";
-                    log.LogInformation("Current url : "+api_url);
-                    
-                    // Call first API to get gatway operationID
-                    
-                    client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-                    var response = await client.PostAsync(api_url,null);
-                    response.EnsureSuccessStatusCode();
-                    log.LogInformation("Current Status code"+(response.IsSuccessStatusCode).ToString());
-                    log.LogInformation("Cheack header");
-
-                    string location = response.Headers.GetValues("location").FirstOrDefault();;
-                    log.LogInformation("found location : " + location);
-
-                    
-                    HttpClient client2 = new HttpClient();
-                    client2.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-                    string responseBody ="Content is blank";
-                    while(true)
+                    if (httpResponse.StatusCode.ToString() == "OK")
                     {
-
-                        var httpResponse = client2.GetAsync(location).Result;
-                        httpResponse.EnsureSuccessStatusCode();
-                        log.LogInformation("Current Status code "+httpResponse.StatusCode.ToString());
-                        
-                        if (httpResponse.StatusCode.ToString()=="OK")
-                        {
-                            responseBody = httpResponse.Content.ReadAsStringAsync().Result;
-                            break;
-                        }
-                        else
-                        {
-                            location = httpResponse.Headers.GetValues("location").FirstOrDefault();
-                            Thread.Sleep(100);
-                        }
-                        
-
-
+                        responseBody = httpResponse.Content.ReadAsStringAsync().Result;
+                        break;
                     }
-                    log.LogInformation(responseBody);
-
-
-
-                    if(filter != null)
+                    else
                     {
-                        if((filter.ToUpper()=="UP") || (filter.ToUpper()=="HEALTHY"))
-                        {
-                            Boolean found =false;
-                            Boolean foundglobal =false;
-                            Root unhealthypools = new Root();
-                            Root healthpools = JsonConvert.DeserializeObject<Root>(responseBody);
-                            foreach(BackendAddressPool pool in healthpools.backendAddressPools )
-                            {  
-                                found =false;
-                                BackendAddressPool unBackendAddressPool = new BackendAddressPool();
-                                unBackendAddressPool.backendAddressPool=pool.backendAddressPool;
-                                
-                                foreach(BackendHttpSettingsCollection col in pool.backendHttpSettingsCollection)
-                                {
-                                    BackendHttpSettingsCollection unBackendHttpSettingsCollection = new BackendHttpSettingsCollection();
-                                    unBackendHttpSettingsCollection.backendHttpSettings=col.backendHttpSettings;
+                        location = httpResponse.Headers.GetValues("location").FirstOrDefault();
+                        Thread.Sleep(100);
+                    }
 
-                                    foreach(Server s in col.servers)
+
+
+                }
+
+                log.LogInformation(responseBody);
+
+
+
+                if (filter != null)
+                {
+                    log.LogInformation("========================== Function will filter the output now ================================");
+                    Root healthpools = JsonConvert.DeserializeObject<Root>(responseBody);
+                    Root unhealthpools = JsonConvert.DeserializeObject<Root>(responseBody);
+
+                    Boolean pool = true;
+                    while (pool)
+                    {
+                        pool = false;
+                        for (int x = 0; x < healthpools.backendAddressPools.Count; x++)
+                        {
+                            Boolean col = true;
+                            while (col)
+                            {
+                                col = false;
+                                for (int y = 0; y < healthpools.backendAddressPools[x].backendHttpSettingsCollection.Count; y++)
+                                {
+                                    Boolean server = true;
+                                    while (server)
                                     {
-                                        if ((s.health!="HEALTHY") & (s.health!="UP"))
+                                        server = false;
+                                        for (int z = 0; z < healthpools.backendAddressPools[x].backendHttpSettingsCollection[y].servers.Count; z++)
                                         {
-                                            found = true;
-                                            foundglobal = true;
-                                            Server unServer = new Server();
-                                            unBackendHttpSettingsCollection.servers.Add(unServer);
+                                            if ((healthpools.backendAddressPools[x].backendHttpSettingsCollection[y].servers[z].health.ToUpper() == filter.ToUpper()))
+                                            {
+                                                healthpools.backendAddressPools[x].backendHttpSettingsCollection[y].servers.RemoveAt(z);
+                                                server = true;
+                                                log.LogInformation("server from output");
+                                            }
                                         }
                                     }
 
-                                    if (found)
+                                    if (healthpools.backendAddressPools[x].backendHttpSettingsCollection[y].servers.Count == 0)
                                     {
-                                        unBackendAddressPool.backendHttpSettingsCollection.Add(unBackendHttpSettingsCollection);
-                                    }   
-
-                                }
-
-                                    if (found)
-                                    {
-                                        unhealthypools.backendAddressPools.Add(unBackendAddressPool);
+                                        healthpools.backendAddressPools[x].backendHttpSettingsCollection.RemoveAt(y);
+                                        col = true;
+                                        log.LogInformation("Remove collection from output");
                                     }
-
-
+                                }
                             }
-
-                            if(foundglobal)
+                            if (healthpools.backendAddressPools[x].backendHttpSettingsCollection.Count == 0)
                             {
-                                responseBody = JsonConvert.SerializeObject(unhealthypools);
+                                healthpools.backendAddressPools.RemoveAt(x);
+                                pool = true;
+                                log.LogInformation("Remove Pool from output");
                             }
+
                         }
                     }
 
-                    return new HttpResponseMessage(HttpStatusCode.OK) {
-                        Content = new StringContent(responseBody, Encoding.UTF8, "application/json")
-                    };
-                                
-                }
-                catch (System.Exception exe)
-                {
-                    log.LogInformation("Error during process the action: {}",exe.Message);
+                    responseBody = JsonConvert.SerializeObject(healthpools);
+
                 }
 
-                return null;
-                
+
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(responseBody, Encoding.UTF8, "application/json")
+                };
+
+            }
+            catch (System.Exception exe)
+            {
+                log.LogInformation("Error during process the action: {}", exe.Message);
+            }
+
+            return null;
+
         }
 
 
@@ -167,6 +179,6 @@ namespace GatwaybackendHealth
             return Environment.GetEnvironmentVariable(variableName);
         }
 
-   
+
     }
 }
