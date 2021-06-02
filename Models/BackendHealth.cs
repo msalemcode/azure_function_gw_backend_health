@@ -11,7 +11,7 @@ namespace GatwaybackendHealth.Models
         public string getId() 
         {
             String[]  myId = id.Split("/");
-            return String.Concat(id[8],"/",id[10]);
+            return String.Concat(id[10]);
         }
     }
 
